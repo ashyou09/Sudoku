@@ -209,11 +209,7 @@
                 </div>
                 
                 <div id="multiplayer-options" class="hidden">
-                    <button id="create-game-btn" class="w-full mb-4 px-4 py-3 bg-green-500 text-white font-bold rounded-lg hover:bg-green-600 transition">Create Game</button>
-                    <div class="flex items-center space-x-2">
-                        <input type="text" id="join-game-id" placeholder="Enter Game ID" class="flex-grow p-2 border border-gray-300 rounded-lg">
-                        <button id="join-game-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">Join</button>
-                    </div>
+                    <button id="create-game-btn" class="w-full px-4 py-3 bg-green-500 text-white font-bold rounded-lg hover:bg-green-600 transition">Start Game</button>
                 </div>
 
                 <button id="start-ai-game-btn" class="w-full px-4 py-3 bg-green-500 text-white font-bold rounded-lg hover:bg-green-600 transition">Start Game</button>
@@ -757,43 +753,25 @@ MOVE:`;
                 // Generate new Sudoku with AI
                 const { puzzle, solution, p1Cells, p2Cells } = await sudokuGenerator.generate(difficulty);
             
-            const gameData = {
+                const gameData = {
                     p1: 'Player 1',
                     p2: mode === 'ai' ? 'AI' : 'Player 2',
-                puzzle,
-                solution,
-                p1Cells,
-                p2Cells,
-                turn: 'player1',
-                timerSetting: parseInt(timer),
-                turnEndTime: Date.now() + parseInt(timer) * 1000,
-                status: mode === 'ai' ? 'active' : 'waiting',
-                winner: null,
-                createdAt: Date.now(),
-                difficulty: difficulty,
-                mode: mode,
-            };
+                    puzzle,
+                    solution,
+                    p1Cells,
+                    p2Cells,
+                    turn: 'player1',
+                    timerSetting: parseInt(timer),
+                    turnEndTime: Date.now() + parseInt(timer) * 1000,
+                    status: 'active', // Game starts immediately for both modes
+                    winner: null,
+                    createdAt: Date.now(),
+                    difficulty: difficulty,
+                    mode: mode,
+                };
 
-                if (mode === 'ai') {
-                    // Start AI game directly
-                    startStandaloneGame(gameData);
-                } else {
-                    // For player mode, show game ID and wait for join
-                    const gameId = Math.random().toString(36).substring(2, 8).toUpperCase();
-                    gameData.gameId = gameId;
-                    currentGame = gameData;
-                    localPlayerNumber = 1;
-                    
-                    setupModal.classList.add('hidden');
-                    gameArea.classList.remove('hidden');
-                    document.getElementById('score-display').classList.remove('hidden');
-                    document.getElementById('game-id-display').textContent = `Game ID: ${gameId} - Waiting for Player 2...`;
-                    
-                    updateUI(gameData);
-                    updateTimers(gameData);
-                    
-                    console.log(`🎮 Game created! Share Game ID: ${gameId}`);
-                }
+                // Both AI and Player vs Player modes will start a standalone game
+                startStandaloneGame(gameData);
                 
             } catch (error) {
                 console.error("Error creating game: ", error);
@@ -801,65 +779,21 @@ MOVE:`;
             }
         }
 
-        async function joinGame(id) {
-            if (!id) {
-                showMessage("Error", "Please enter a Game ID.");
-                return;
-            }
-            
-            // For standalone mode, simulate joining a game
-            gameId = id.toUpperCase();
-            localPlayerNumber = 2; // Joining player is always player 2
-            
-            // Use the existing game data if available, otherwise generate new
-            if (currentGame && currentGame.gameId === gameId) {
-                // Update the game to active status
-                currentGame.status = 'active';
-                currentGame.p2 = 'Player 2';
-                currentGame.turn = 'player1';
-                currentGame.turnEndTime = Date.now() + currentGame.timerSetting * 1000;
-                } else {
-                // Generate new game data
-                const { puzzle, solution, p1Cells, p2Cells } = await sudokuGenerator.generate('medium');
-                
-                currentGame = {
-                    p1: 'Player 1',
-                    p2: 'Player 2',
-                    puzzle,
-                    solution,
-                    p1Cells,
-                    p2Cells,
-                    turn: 'player1',
-                    timerSetting: 30,
-                    turnEndTime: Date.now() + 30 * 1000,
-                    status: 'active',
-                    winner: null,
-                    createdAt: Date.now(),
-                    difficulty: 'medium',
-                    mode: 'player',
-                };
-                }
-
-                setupModal.classList.add('hidden');
-                gameArea.classList.remove('hidden');
-            document.getElementById('score-display').classList.remove('hidden');
-                document.getElementById('game-id-display').textContent = `Game ID: ${gameId}`;
-
-            updateUI(currentGame);
-            updateTimers(currentGame);
-            
-            console.log('🎮 Joined game successfully!');
-        }
-
         function startStandaloneGame(gameData) {
             gameId = 'standalone-game';
-            localPlayerNumber = 1;
+            localPlayerNumber = 1; // In hot-seat, we just need a reference, turn logic handles the rest
             currentGame = gameData;
             
             setupModal.classList.add('hidden');
             gameArea.classList.remove('hidden');
             document.getElementById('score-display').classList.remove('hidden');
-            document.getElementById('game-id-display').textContent = `AI Generated ${gameData.difficulty.toUpperCase()} Puzzle`;
+            
+            const gameIdDisplay = document.getElementById('game-id-display');
+            if (gameData.mode === 'ai') {
+                gameIdDisplay.textContent = `AI Generated ${gameData.difficulty.toUpperCase()} Puzzle`;
+            } else {
+                gameIdDisplay.textContent = `Local Duel (${gameData.difficulty.toUpperCase()})`;
+            }
             
             updateUI(gameData);
 
@@ -1050,11 +984,6 @@ MOVE:`;
             
             document.getElementById('create-game-btn').addEventListener('click', () => {
                 createGame('player', document.getElementById('timer-select').value, selectedDifficulty);
-            });
-            
-            document.getElementById('join-game-btn').addEventListener('click', () => {
-                const joinId = document.getElementById('join-game-id').value;
-                joinGame(joinId);
             });
             
             document.getElementById('message-close-btn').addEventListener('click', () => {
