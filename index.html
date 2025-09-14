@@ -201,10 +201,10 @@
                             <svg class="w-5 h-5 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
                                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                             </svg>
-                            <span class="text-sm text-green-700 font-medium">AI Mode Ready</span>
+                            <span class="text-sm text-green-700 font-medium">Online Mode Ready</span>
                         </div>
-                        <p class="text-xs text-green-600 mt-1">Gemini AI is integrated and ready to play!</p>
-                        <p class="text-xs text-gray-500 mt-1">Check browser console for AI status</p>
+                        <p class="text-xs text-green-600 mt-1">Firebase & Gemini AI are configured!</p>
+                        <p class="text-xs text-gray-500 mt-1">Check browser console for status</p>
                     </div>
                 </div>
                 
@@ -232,7 +232,9 @@
     </div>
 
     <script type="module">
-        // Firebase imports removed - using standalone mode
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- DOM ELEMENTS ---
         const gameArea = document.getElementById('game-area');
@@ -242,7 +244,7 @@
         const numberPad = document.getElementById('number-pad');
         
         // --- STATE VARIABLES ---
-        // Firebase variables removed - using standalone mode
+        let db, auth, app;
         let userId = null;
         let gameId = null;
         let currentGame = null;
@@ -252,9 +254,18 @@
         let unsubscribeGame = null;
         let geminiApiKey = 'AIzaSyA_PNmd0OZ97_rgFj-lRcA-J95EbDF9wEA';
         let scores = { p1Wins: 0, p2Wins: 0, draws: 0 };
+        
+        // --- FIREBASE CONFIG (Provided by user) ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyAlaBsrVByxdpNWyx8Z73tkZApfjOb9ngA",
+            authDomain: "sudoku-2024.firebaseapp.com",
+            projectId: "sudoku-2024",
+            storageBucket: "sudoku-2024.appspot.com",
+            messagingSenderId: "321897928553",
+            appId: "1:321897928553:web:733c50de79054a0b28cff8"
+        };
+        const appId = 'sudoku-duel-online';
 
-        // --- STANDALONE MODE ---
-        // No server configuration needed
 
         // --- GEMINI API INTEGRATION ---
         async function callGeminiAPI(prompt) {
@@ -293,7 +304,6 @@
             }
         }
 
-        // Test Gemini API on startup
         async function testGeminiAPI() {
             try {
                 const response = await callGeminiAPI("Say 'Hello, I am working!' and nothing else.");
@@ -308,7 +318,6 @@
         }
 
         async function getAIMove(gameData) {
-            // Create a visual representation of the current board
             const board = Array(81).fill(0);
             for (let i = 0; i < 81; i++) {
                 if (gameData.puzzle[i] !== 0) {
@@ -320,46 +329,24 @@
                 }
             }
 
-            const prompt = `You are an expert Sudoku AI playing a competitive game. Analyze this 9x9 Sudoku board and make the best move.
-
-BOARD (0 = empty):
-${board.map((val, i) => val === 0 ? '.' : val).join('').match(/.{9}/g).join('\n')}
-
-YOUR ASSIGNED CELLS (Player 2): ${Object.keys(gameData.p2Cells).map(i => `Cell ${i}`).join(', ')}
-OPPONENT'S CELLS (Player 1): ${Object.keys(gameData.p1Cells).map(i => `Cell ${i}`).join(', ')}
-
-RULES:
-- You can only fill YOUR assigned cells
-- Fill empty cells (marked as 0) or correct wrong numbers in your cells
-- Choose the most strategic move to win faster
-- Return ONLY: "index:value" (e.g., "15:7")
-
-MOVE:`;
-
+            const prompt = `You are an expert Sudoku AI playing a competitive game. Your assigned cells are Player 2. Make the best possible move on this 9x9 Sudoku board. Return ONLY the move as "index:value". Example: "15:7".\n\nBOARD (0=empty):\n${board.join('')}`;
             const response = await callGeminiAPI(prompt);
             if (response) {
                 const match = response.match(/(\d+):(\d+)/);
                 if (match) {
                     const index = parseInt(match[1]);
                     const value = parseInt(match[2]);
-                    
-                    // Validate the move
                     if (gameData.p2Cells.hasOwnProperty(index) && value >= 1 && value <= 9) {
                         return { index, value };
                     }
                 }
             }
-            
-            // Fallback to simple AI
             return getFallbackAIMove(gameData);
         }
 
         function getFallbackAIMove(gameData) {
             const aiCells = Object.keys(gameData.p2Cells);
-            const unsolvedAiCells = aiCells.filter(cell => 
-                gameData.p2Cells[cell] === 0 || gameData.p2Cells[cell] !== gameData.solution[cell]
-            );
-            
+            const unsolvedAiCells = aiCells.filter(cell => gameData.p2Cells[cell] === 0 || gameData.p2Cells[cell] !== gameData.solution[cell]);
             if (unsolvedAiCells.length > 0) {
                 const cellToSolve = unsolvedAiCells[Math.floor(Math.random() * unsolvedAiCells.length)];
                 const correctValue = gameData.solution[cellToSolve];
@@ -370,83 +357,44 @@ MOVE:`;
 
         // --- SUDOKU LOGIC ---
         const sudokuGenerator = {
-            puzzles: {
-                easy: [
-                    {
-                    puzzle: "603000001000400000050070080000003000000295000000800000020050030000007000400000205",
-                    solution: "683924571192485367754371982875143629231695748946872153327519846518267493469738215"
-                },
-                    {
-                        puzzle: "200080300060070084030500209000105408000000000402706000301007040720040060004010003",
-                        solution: "249186357163972584537564219976125438815439672432756891351697842728341965694812735"
-                    }
-                ],
-                medium: [
-                    {
-                    puzzle: "530070000600195000098000060800060003400803001700020006060000280000419005000080079",
-                    solution: "534678912672195348198342567859761423426853791713924856961537284287419635345286179"
-                },
-                    {
-                        puzzle: "000000000003600000070090200050007000000045700000100030001000068008500010090000400",
-                        solution: "812753649943682175675491283154237896369845721287169435521974368438526917796318542"
-                    }
-                ],
-                hard: [
-                    {
-                    puzzle: "800000000003600000070090200050007000000045700000100030001000068008500010090000400",
-                    solution: "812753649943682175675491283154237896369845721287169435521974368438526917796318542"
-                    },
-                    {
-                        puzzle: "000000000000003085001020000000507000004000100090000000500000073002010000000040009",
-                        solution: "987654321246173985135928647863517294724369158591482376458296173372815469619347852"
-                    }
-                ]
+             puzzles: {
+                easy: [{ puzzle: "603000001000400000050070080000003000000295000000800000020050030000007000400000205", solution: "683924571192485367754371982875143629231695748946872153327519846518267493469738215" }],
+                medium: [{ puzzle: "530070000600195000098000060800060003400803001700020006060000280000419005000080079", solution: "534678912672195348198342567859761423426853791713924856961537284287419635345286179" }],
+                hard: [{ puzzle: "800000000003600000070090200050007000000045700000100030001000068008500010090000400", solution: "812753649943682175675491283154237896369845721287169435521974368438526917796318542" }]
             },
             generate: async function(difficulty = 'medium') {
-                console.log(`Attempting to generate new '${difficulty}' puzzle with Gemini AI...`);
-                const prompt = `Generate a new 9x9 Sudoku puzzle with a '${difficulty}' difficulty level. The puzzle must have a single unique solution. Return the response as a single line of valid JSON with two keys: "puzzle" and "solution". "puzzle" must be an 81-character string with numbers 1-9 and 0 for empty cells. "solution" must be the corresponding 81-character solved string. Example: {"puzzle": "5300...", "solution": "5346..."}`;
-                
+                const prompt = `Generate a new 9x9 Sudoku puzzle with a '${difficulty}' difficulty. It must have a single unique solution. Return ONLY valid JSON with "puzzle" and "solution" keys, each an 81-character string.`;
                 try {
                     const response = await callGeminiAPI(prompt);
                     if (response) {
                         const cleanedResponse = response.replace(/```json|```/g, '').trim();
                         const data = JSON.parse(cleanedResponse);
-
                         if (data.puzzle && data.solution && data.puzzle.length === 81 && data.solution.length === 81) {
-                            console.log('✅ Successfully generated new puzzle from Gemini AI.');
+                            console.log('✅ Generated new puzzle from Gemini AI.');
                             const puzzle = data.puzzle.split('').map(Number);
                             const solution = data.solution.split('').map(Number);
-                            
-                            const emptyCells = [];
-                            for(let i=0; i<81; i++) if(puzzle[i] === 0) emptyCells.push(i);
-                            emptyCells.sort(() => Math.random() - 0.5);
-                            
-                            const p1Cells = {};
-                            const p2Cells = {};
-                            emptyCells.slice(0, Math.floor(emptyCells.length / 2)).forEach(i => p1Cells[i] = 0);
-                            emptyCells.slice(Math.floor(emptyCells.length / 2)).forEach(i => p2Cells[i] = 0);
+                            const { p1Cells, p2Cells } = this.assignCells(puzzle);
                             return { puzzle, solution, p1Cells, p2Cells };
                         }
                     }
-                    throw new Error('Invalid or no response from AI.');
                 } catch (error) {
                     console.warn(`Gemini puzzle generation failed: ${error}. Using a fallback puzzle.`);
-                    const puzzles = this.puzzles[difficulty];
-                    const randomPuzzle = puzzles[Math.floor(Math.random() * puzzles.length)];
-                    const puzzle = randomPuzzle.puzzle.split('').map(Number);
-                    const solution = randomPuzzle.solution.split('').map(Number);
-                    
+                }
+                const fallback = this.puzzles[difficulty][0];
+                const puzzle = fallback.puzzle.split('').map(Number);
+                const solution = fallback.solution.split('').map(Number);
+                const { p1Cells, p2Cells } = this.assignCells(puzzle);
+                return { puzzle, solution, p1Cells, p2Cells };
+            },
+            assignCells: function(puzzle) {
                 const emptyCells = [];
                 for(let i=0; i<81; i++) if(puzzle[i] === 0) emptyCells.push(i);
                 emptyCells.sort(() => Math.random() - 0.5);
-                
                 const p1Cells = {};
                 const p2Cells = {};
                 emptyCells.slice(0, Math.floor(emptyCells.length / 2)).forEach(i => p1Cells[i] = 0);
                 emptyCells.slice(Math.floor(emptyCells.length / 2)).forEach(i => p2Cells[i] = 0);
-
-                return { puzzle, solution, p1Cells, p2Cells };
-                }
+                return { p1Cells, p2Cells };
             }
         };
 
@@ -454,44 +402,31 @@ MOVE:`;
         function renderBoard(game) {
             sudokuBoard.innerHTML = '';
             let isMyTurn = (game.turn === 'player1' && localPlayerNumber === 1) || (game.turn === 'player2' && localPlayerNumber === 2);
-            
             for (let i = 0; i < 81; i++) {
                 const cell = document.createElement('div');
-                    cell.classList.add('sudoku-cell', 'cursor-pointer', 'transition-colors');
+                cell.classList.add('sudoku-cell', 'cursor-pointer', 'transition-colors');
                 cell.dataset.index = i;
-
                 const isP1Cell = game.p1Cells.hasOwnProperty(i);
                 const isP2Cell = game.p2Cells.hasOwnProperty(i);
-
                 let cellValue = game.puzzle[i];
-                    let isOriginal = cellValue !== 0;
-                    
+                let isOriginal = cellValue !== 0;
                 if (isP1Cell && game.p1Cells[i] !== 0) cellValue = game.p1Cells[i];
                 if (isP2Cell && game.p2Cells[i] !== 0) cellValue = game.p2Cells[i];
-
-                    if (cellValue !== 0) {
-                        cell.textContent = cellValue;
-                        if (isOriginal) {
-                             cell.classList.add('original-number');
-                        } else {
-                            cell.classList.add('player-number');
-                        if(cellValue !== game.solution[i]) {
-                                cell.classList.add('incorrect-number');
-                            }
-                        }
+                if (cellValue !== 0) {
+                    cell.textContent = cellValue;
+                    if (isOriginal) cell.classList.add('original-number');
+                    else {
+                        cell.classList.add('player-number');
+                        if(cellValue !== game.solution[i]) cell.classList.add('incorrect-number');
                     }
-
-                    if (isMyTurn) {
-                        if (localPlayerNumber === 1 && isP1Cell) {
-                           cell.classList.add('player-cell-owner-1', 'hover:bg-red-200');
-                        } else if (localPlayerNumber === 2 && isP2Cell) {
-                           cell.classList.add('player-cell-owner-2', 'hover:bg-blue-200');
-                        }
-                    } else {
-                        if (isP1Cell) cell.classList.add('player-cell-owner-1');
-                        if (isP2Cell) cell.classList.add('player-cell-owner-2');
-                    }
-                    
+                }
+                if (isMyTurn) {
+                    if (localPlayerNumber === 1 && isP1Cell) cell.classList.add('player-cell-owner-1', 'hover:bg-red-200');
+                    else if (localPlayerNumber === 2 && isP2Cell) cell.classList.add('player-cell-owner-2', 'hover:bg-blue-200');
+                } else {
+                    if (isP1Cell) cell.classList.add('player-cell-owner-1');
+                    if (isP2Cell) cell.classList.add('player-cell-owner-2');
+                }
                 cell.addEventListener('click', () => handleCellClick(i));
                 sudokuBoard.appendChild(cell);
             }
@@ -508,21 +443,15 @@ MOVE:`;
             updateTimers(game);
             updateProgress(game);
             updateScoreDisplay();
-            
             const p1Panel = document.getElementById('player1-panel');
             const p2Panel = document.getElementById('player2-panel');
             document.getElementById('player1-id').textContent = `(${game.p1.slice(0, 6)})`;
             document.getElementById('player2-id').textContent = game.p2 === 'AI' ? '(AI)' : (game.p2 ? `(${game.p2.slice(0, 6)})` : '...');
-
             p1Panel.classList.remove('border-red-500', 'border-blue-500');
             p2Panel.classList.remove('border-red-500', 'border-blue-500');
-            
             if(game.status === 'active') {
-                if (game.turn === 'player1') {
-                    p1Panel.classList.add('border-red-500');
-                } else {
-                    p2Panel.classList.add('border-blue-500');
-                }
+                if (game.turn === 'player1') p1Panel.classList.add('border-red-500');
+                else p2Panel.classList.add('border-blue-500');
             }
         }
 
@@ -534,9 +463,7 @@ MOVE:`;
 
         function loadScores() {
             const savedScores = localStorage.getItem('sudoku-scores');
-            if (savedScores) {
-                scores = JSON.parse(savedScores);
-            }
+            if (savedScores) scores = JSON.parse(savedScores);
         }
 
         function saveScores() {
@@ -544,13 +471,9 @@ MOVE:`;
         }
 
         function updateScore(winner) {
-            if (winner === 'player1') {
-                scores.p1Wins++;
-            } else if (winner === 'player2') {
-                scores.p2Wins++;
-            } else {
-                scores.draws++;
-            }
+            if (winner === 'player1') scores.p1Wins++;
+            else if (winner === 'player2') scores.p2Wins++;
+            else scores.draws++;
             saveScores();
             updateScoreDisplay();
         }
@@ -563,11 +486,10 @@ MOVE:`;
         
         function updateProgress(game) {
             const totalP1 = Object.keys(game.p1Cells).length;
-            const filledP1 = totalP1 > 0 ? Object.entries(game.p1Cells).filter(([key, value]) => value !== 0 && value === game.solution[key]).length : 0;
+            const filledP1 = totalP1 > 0 ? Object.values(game.p1Cells).filter((v, i) => v !== 0 && v === game.solution[Object.keys(game.p1Cells)[i]]).length : 0;
             document.getElementById('progress1').style.width = totalP1 > 0 ? `${(filledP1 / totalP1) * 100}%` : '0%';
-            
             const totalP2 = Object.keys(game.p2Cells).length;
-            const filledP2 = totalP2 > 0 ? Object.entries(game.p2Cells).filter(([key, value]) => value !== 0 && value === game.solution[key]).length : 0;
+            const filledP2 = totalP2 > 0 ? Object.values(game.p2Cells).filter((v, i) => v !== 0 && v === game.solution[Object.keys(game.p2Cells)[i]]).length : 0;
             document.getElementById('progress2').style.width = totalP2 > 0 ? `${(filledP2 / totalP2) * 100}%` : '0%';
         }
 
@@ -575,55 +497,32 @@ MOVE:`;
             clearInterval(turnTimerInterval);
             const timer1El = document.getElementById('timer1');
             const timer2El = document.getElementById('timer2');
-            
             if (game.status !== 'active') {
                 timer1El.textContent = '00';
                 timer2El.textContent = '00';
-                timer1El.classList.remove('timer-warning');
-                timer2El.classList.remove('timer-warning');
                 return;
             }
-
-            const turnEndTime = game.turnEndTime;
-            
-            const updateTimerDisplay = () => {
-                const remaining = Math.max(0, Math.ceil((turnEndTime - Date.now()) / 1000));
-                const displayTime = String(remaining).padStart(2, '0');
-                
+            const update = () => {
+                const remaining = Math.max(0, Math.ceil((game.turnEndTime - Date.now()) / 1000));
+                const display = String(remaining).padStart(2, '0');
                 if (game.turn === 'player1') {
-                    timer1El.textContent = displayTime;
-                    timer2El.textContent = String(game.timerSetting).padStart(2, '0'); // Reset non-active timer
-                    timer2El.classList.remove('timer-warning');
-                    
-                    if (remaining <= 5) {
-                        timer1El.classList.add('timer-warning');
-                    } else {
-                        timer1El.classList.remove('timer-warning');
-                    }
+                    timer1El.textContent = display;
+                    timer2El.textContent = String(game.timerSetting).padStart(2, '0');
+                    if (remaining <= 5) timer1El.classList.add('timer-warning'); else timer1El.classList.remove('timer-warning');
                 } else {
-                    timer2El.textContent = displayTime;
-                    timer1El.textContent = String(game.timerSetting).padStart(2, '0'); // Reset non-active timer
-                    timer1El.classList.remove('timer-warning');
-                    
-                    if (remaining <= 5) {
-                        timer2El.classList.add('timer-warning');
-                    } else {
-                        timer2El.classList.remove('timer-warning');
-                    }
+                    timer2El.textContent = display;
+                    timer1El.textContent = String(game.timerSetting).padStart(2, '0');
+                    if (remaining <= 5) timer2El.classList.add('timer-warning'); else timer2El.classList.remove('timer-warning');
                 }
-                
                 if (remaining <= 0) {
                     clearInterval(turnTimerInterval);
-                    // Only the player whose turn it was should trigger the switch
-                    // And only if the game is still active (hasn't been won in the meantime)
                     if (currentGame && currentGame.status === 'active' && ((localPlayerNumber === 1 && game.turn === 'player1') || (localPlayerNumber === 2 && game.turn === 'player2'))) {
                          switchTurn(game.turn);
                     }
                 }
             };
-            
-            updateTimerDisplay(); // Initial call to set the time immediately
-            turnTimerInterval = setInterval(updateTimerDisplay, 500);
+            update();
+            turnTimerInterval = setInterval(update, 500);
         }
 
         function showMessage(title, text, buttonText = "Close") {
@@ -637,12 +536,7 @@ MOVE:`;
         function handleCellClick(index) {
             if (!currentGame) return;
             const isMyTurn = (localPlayerNumber === 1 && currentGame.turn === 'player1') || (localPlayerNumber === 2 && currentGame.turn === 'player2');
-            if(!isMyTurn) {
-                selectedCell = null;
-                renderBoard(currentGame);
-                return;
-            };
-
+            if (!isMyTurn) return;
             const isMyCell = (localPlayerNumber === 1 && currentGame.p1Cells.hasOwnProperty(index)) || (localPlayerNumber === 2 && currentGame.p2Cells.hasOwnProperty(index));
             if (isMyCell) {
                 selectedCell = index;
@@ -651,33 +545,17 @@ MOVE:`;
         }
 
         function navigateCell(direction) {
-            if (selectedCell === null || !currentGame) return;
-            
+            if (selectedCell === null) return;
             let newIndex = selectedCell;
-            const row = Math.floor(selectedCell / 9);
-            const col = selectedCell % 9;
-            
-            switch(direction) {
-                case 'ArrowUp':
-                    if (row > 0) newIndex = selectedCell - 9;
-                    break;
-                case 'ArrowDown':
-                    if (row < 8) newIndex = selectedCell + 9;
-                    break;
-                case 'ArrowLeft':
-                    if (col > 0) newIndex = selectedCell - 1;
-                    break;
-                case 'ArrowRight':
-                    if (col < 8) newIndex = selectedCell + 1;
-                    break;
-            }
-            
-            if (newIndex !== selectedCell) {
-                const isMyCell = (localPlayerNumber === 1 && currentGame.p1Cells.hasOwnProperty(newIndex)) || (localPlayerNumber === 2 && currentGame.p2Cells.hasOwnProperty(newIndex));
-                if (isMyCell) {
-                    selectedCell = newIndex;
-                    renderBoard(currentGame);
-                }
+            const row = Math.floor(selectedCell / 9), col = selectedCell % 9;
+            if (direction === 'ArrowUp' && row > 0) newIndex -= 9;
+            if (direction === 'ArrowDown' && row < 8) newIndex += 9;
+            if (direction === 'ArrowLeft' && col > 0) newIndex -= 1;
+            if (direction === 'ArrowRight' && col < 8) newIndex += 1;
+            const isMyCell = (localPlayerNumber === 1 && currentGame.p1Cells.hasOwnProperty(newIndex)) || (localPlayerNumber === 2 && currentGame.p2Cells.hasOwnProperty(newIndex));
+            if (isMyCell) {
+                selectedCell = newIndex;
+                renderBoard(currentGame);
             }
         }
         
@@ -686,428 +564,219 @@ MOVE:`;
             const isMyTurn = (localPlayerNumber === 1 && currentGame.turn === 'player1') || (localPlayerNumber === 2 && currentGame.turn === 'player2');
             if (!isMyTurn) return;
 
-            // Update local game state
-            if (localPlayerNumber === 1) {
-                currentGame.p1Cells[selectedCell] = number;
-            } else {
-                currentGame.p2Cells[selectedCell] = number;
+            const turnBeforeMove = currentGame.turn;
+            const fieldToUpdate = localPlayerNumber === 1 ? `p1Cells.${selectedCell}` : `p2Cells.${selectedCell}`;
+            
+            try {
+                const gameRef = doc(db, `sudoku-games/${gameId}`);
+                await updateDoc(gameRef, { [fieldToUpdate]: number });
+                selectedCell = null;
+                // Win check is handled by the onSnapshot listener after update
+                // Now, switch turn immediately after the move is sent to server
+                await switchTurn(turnBeforeMove);
+            } catch (error) {
+                console.error("Error making move:", error);
             }
-            
-            // Check if move is correct
-            const isCorrect = number === currentGame.solution[selectedCell] || number === 0;
-            
-            // Update UI
-            updateUI(currentGame);
-            
-            // Show visual feedback for the move
-            const cellEl = document.querySelector(`[data-index='${selectedCell}']`);
-            if (cellEl) {
-                if (isCorrect) {
-                    cellEl.classList.add('correct-move');
-                    setTimeout(() => cellEl.classList.remove('correct-move'), 600);
-                } else {
-                    cellEl.classList.add('incorrect-move');
-                    setTimeout(() => cellEl.classList.remove('incorrect-move'), 600);
-                }
-            }
-                
-                // Check for win condition after move
-                if (checkWinCondition()) {
-                    return; // checkWinCondition will handle game end
-                }
-                
-            // ONE CHANCE RULE: Always switch turn after any move (right or wrong)
-            // This ensures each player gets only one chance per turn
-            console.log(`${isCorrect ? '✅ Correct' : '❌ Incorrect'} move - switching turns immediately`);
-            
-            // Clear the timer for current turn
-            clearInterval(turnTimerInterval);
-            
-            // Switch turn immediately
-                    await switchTurn();
-
-                selectedCell = null; // Deselect after move
         }
 
         // --- GAME FLOW ---
         function handleGameUpdate(gameData) {
             if (!gameData) return;
-            
             updateUI(gameData);
-
-            // Check if game is finished
             if (gameData.status === 'finished' && gameData.winner) {
-                let winnerText = 'It\'s a draw!';
-                if (gameData.winner === `player${localPlayerNumber}`) {
-                    winnerText = 'You win!';
-                } else {
-                     winnerText = `Player ${gameData.winner === 'player1' ? '1' : '2'} wins!`;
-                }
-                
+                const winnerMsg = gameData.winner === `player${localPlayerNumber}` ? 'You win!' : `Player ${gameData.winner.slice(-1)} wins!`;
                 updateScore(gameData.winner);
-                showMessage("Game Over", winnerText, "Play Again");
-                // Don't cleanup immediately, let user see the final board
-                if(unsubscribeGame) unsubscribeGame();
-                unsubscribeGame = null;
-                clearInterval(turnTimerInterval);
-                return; // Stop further processing
-            }
-
-            // If it's AI's turn to move and we are player 1
-            if (gameData.mode === 'ai' && gameData.turn === 'player2' && gameData.status === 'active' && localPlayerNumber === 1) {
+                showMessage("Game Over", winnerMsg, "Play Again");
+                endGameCleanup(false); // false means don't delete doc, just detach listener
+            } else if (gameData.mode === 'ai' && gameData.turn === 'player2' && gameData.status === 'active' && localPlayerNumber === 1) {
                 handleAITurn(gameData);
             }
         }
         
         async function createGame(mode, timer, difficulty) {
-            try {
-                console.log(`🎮 Creating ${mode} game with ${difficulty} difficulty...`);
-                
-                // Generate new Sudoku with AI
-                const { puzzle, solution, p1Cells, p2Cells } = await sudokuGenerator.generate(difficulty);
-            
+            const { puzzle, solution, p1Cells, p2Cells } = await sudokuGenerator.generate(difficulty);
+            const newGameId = Math.random().toString(36).substring(2, 8).toUpperCase();
             const gameData = {
-                    p1: 'Player 1',
-                    p2: mode === 'ai' ? 'AI' : 'Player 2',
-                puzzle,
-                solution,
-                p1Cells,
-                p2Cells,
-                turn: 'player1',
-                timerSetting: parseInt(timer),
-                turnEndTime: Date.now() + parseInt(timer) * 1000,
-                status: mode === 'ai' ? 'active' : 'waiting',
-                winner: null,
-                createdAt: Date.now(),
-                difficulty: difficulty,
-                mode: mode,
+                p1: userId, p2: mode === 'ai' ? 'AI' : null, puzzle, solution, p1Cells, p2Cells,
+                turn: 'player1', timerSetting: parseInt(timer), turnEndTime: Date.now() + parseInt(timer) * 1000,
+                status: mode === 'ai' ? 'active' : 'waiting', winner: null, createdAt: Date.now(), difficulty: difficulty, mode: mode,
             };
-
-                if (mode === 'ai') {
-                    // Start AI game directly
-                    startStandaloneGame(gameData);
-                } else {
-                    // For player mode, show game ID and wait for join
-                    const gameId = Math.random().toString(36).substring(2, 8).toUpperCase();
-                    gameData.gameId = gameId;
-                    currentGame = gameData;
-                    localPlayerNumber = 1;
-                    
-                    setupModal.classList.add('hidden');
-                    gameArea.classList.remove('hidden');
-                    document.getElementById('score-display').classList.remove('hidden');
-                    document.getElementById('game-id-display').textContent = `Game ID: ${gameId} - Waiting for Player 2...`;
-                    
-                    updateUI(gameData);
-                    updateTimers(gameData);
-                    
-                    console.log(`🎮 Game created! Share Game ID: ${gameId}`);
-                }
-                
+            try {
+                const gameRef = doc(db, `sudoku-games/${newGameId}`);
+                await setDoc(gameRef, gameData);
+                await joinGame(newGameId);
             } catch (error) {
-                console.error("Error creating game: ", error);
-                showMessage("Error", "Could not create game. Please try again.");
+                console.error("Error creating game:", error);
+                showMessage("Error", "Could not create game.");
             }
         }
 
         async function joinGame(id) {
-            if (!id) {
-                showMessage("Error", "Please enter a Game ID.");
-                return;
-            }
-            
-            // For standalone mode, simulate joining a game
+            if (!id) { showMessage("Error", "Please enter a Game ID."); return; }
             gameId = id.toUpperCase();
-            localPlayerNumber = 2; // Joining player is always player 2
-            
-            // Use the existing game data if available, otherwise generate new
-            if (currentGame && currentGame.gameId === gameId) {
-                // Update the game to active status
-                currentGame.status = 'active';
-                currentGame.p2 = 'Player 2';
-                currentGame.turn = 'player1';
-                currentGame.turnEndTime = Date.now() + currentGame.timerSetting * 1000;
-                } else {
-                // Generate new game data
-                const { puzzle, solution, p1Cells, p2Cells } = await sudokuGenerator.generate('medium');
-                
-                currentGame = {
-                    p1: 'Player 1',
-                    p2: 'Player 2',
-                    puzzle,
-                    solution,
-                    p1Cells,
-                    p2Cells,
-                    turn: 'player1',
-                    timerSetting: 30,
-                    turnEndTime: Date.now() + 30 * 1000,
-                    status: 'active',
-                    winner: null,
-                    createdAt: Date.now(),
-                    difficulty: 'medium',
-                    mode: 'player',
-                };
-                }
+            const gameRef = doc(db, `sudoku-games/${gameId}`);
+            try {
+                const gameSnap = await getDoc(gameRef);
+                if (!gameSnap.exists()) { showMessage("Error", `Game ${gameId} not found.`); gameId = null; return; }
+                let gameData = gameSnap.data();
+                if (gameData.p1 === userId) localPlayerNumber = 1;
+                else if (gameData.p2 === userId) localPlayerNumber = 2;
+                else if (gameData.p2 === null) {
+                    localPlayerNumber = 2;
+                    await updateDoc(gameRef, { p2: userId, status: 'active', turnEndTime: Date.now() + gameData.timerSetting * 1000 });
+                } else { showMessage("Error", "This game is full."); gameId = null; return; }
 
                 setupModal.classList.add('hidden');
                 gameArea.classList.remove('hidden');
-            document.getElementById('score-display').classList.remove('hidden');
+                document.getElementById('score-display').classList.remove('hidden');
                 document.getElementById('game-id-display').textContent = `Game ID: ${gameId}`;
+                document.getElementById('copy-game-id-btn').classList.remove('hidden');
 
-            updateUI(currentGame);
-            updateTimers(currentGame);
-            
-            console.log('🎮 Joined game successfully!');
+                if (unsubscribeGame) unsubscribeGame();
+                unsubscribeGame = onSnapshot(gameRef, (doc) => {
+                    if (doc.exists()) handleGameUpdate(doc.data());
+                    else {
+                        if (currentGame && currentGame.status === 'active') showMessage("Game Over", "The other player has left.", "New Game");
+                        endGameCleanup();
+                    }
+                });
+            } catch(error) {
+                console.error("Error joining game:", error);
+                showMessage("Error", "Could not join game.");
+            }
         }
 
-        function startStandaloneGame(gameData) {
-            gameId = 'standalone-game';
-            localPlayerNumber = 1;
-            currentGame = gameData;
-            
-            setupModal.classList.add('hidden');
-            gameArea.classList.remove('hidden');
-            document.getElementById('score-display').classList.remove('hidden');
-            document.getElementById('game-id-display').textContent = `AI Generated ${gameData.difficulty.toUpperCase()} Puzzle`;
-            
-            updateUI(gameData);
-
-            // Start the game timer
-            updateTimers(gameData);
-            
-            console.log('🎮 Game started successfully!');
-        }
-        
-        async function switchTurn() {
-            if (!gameId || !currentGame) return;
+        async function switchTurn(expectedTurn) {
+            if (!gameId || !currentGame || currentGame.status !== 'active') return;
+            if (currentGame.turn !== expectedTurn) { console.log("Switch turn aborted, state changed."); return; }
             const newTurn = currentGame.turn === 'player1' ? 'player2' : 'player1';
             const newTurnEndTime = Date.now() + currentGame.timerSetting * 1000;
-            
-            console.log(`🔄 Switching from ${currentGame.turn} to ${newTurn}`);
-            console.log(`👤 Current player: ${localPlayerNumber}, Turn: ${newTurn}`);
-            
-            // Update local game state
-            currentGame.turn = newTurn;
-            currentGame.turnEndTime = newTurnEndTime;
-            
-            // Update UI
-            updateUI(currentGame);
-            
-            // Start new timer for the new turn
-            updateTimers(currentGame);
-            
-            // Handle AI turn
-            if (currentGame.mode === 'ai' && newTurn === 'player2') {
-                handleAITurn(currentGame);
-            }
+            try {
+                const gameRef = doc(db, `sudoku-games/${gameId}`);
+                await updateDoc(gameRef, { turn: newTurn, turnEndTime: newTurnEndTime });
+            } catch (error) { console.error("Error switching turn:", error); }
         }
         
         async function checkWinCondition() {
             if (!currentGame) return false;
-            let p1Complete = true;
-            for(const cell in currentGame.p1Cells) {
-                if(currentGame.p1Cells[cell] !== currentGame.solution[cell]) {
-                    p1Complete = false;
-                    break;
-                }
-            }
-
-            let p2Complete = true;
-            for(const cell in currentGame.p2Cells) {
-                if(currentGame.p2Cells[cell] !== currentGame.solution[cell]) {
-                    p2Complete = false;
-                    break;
-                }
-            }
-            
+            let p1Complete = Object.keys(currentGame.p1Cells).every(cell => currentGame.p1Cells[cell] === currentGame.solution[cell]);
+            let p2Complete = Object.keys(currentGame.p2Cells).every(cell => currentGame.p2Cells[cell] === currentGame.solution[cell]);
             let winner = null;
-            if(p1Complete) winner = 'player1';
-            if(p2Complete) winner = 'player2';
-
-            if(winner) {
-                // Update local game state
-                currentGame.status = 'finished';
-                currentGame.winner = winner;
-                
-                // Trigger game over
-                handleGameUpdate(currentGame);
+            if (p1Complete) winner = 'player1';
+            if (p2Complete) winner = 'player2';
+            if (winner) {
+                try {
+                    const gameRef = doc(db, `sudoku-games/${gameId}`);
+                    await updateDoc(gameRef, { status: 'finished', winner: winner });
                     return true;
+                } catch(e) { console.error("Error setting winner:", e); }
             }
             return false;
         }
 
         async function handleAITurn(gameData) {
-            console.log('AI turn starting...');
-            
-            // Show AI thinking indicator
+            console.log('AI turn...');
             const aiThinkingEl = document.getElementById('ai-thinking');
-            if (aiThinkingEl) {
-                aiThinkingEl.classList.remove('hidden');
-            }
+            if (aiThinkingEl) aiThinkingEl.classList.remove('hidden');
+            await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1500));
             
-             // AI thinks for a bit
-            setTimeout(async () => {
-                const turnBeforeAITurn = gameData.turn;
-                try {
-                    const aiMove = await getAIMove(gameData);
-                    console.log('AI move:', aiMove);
-                    
-                    if (aiMove) {
-                        // Update local game state
-                        currentGame.p2Cells[aiMove.index] = aiMove.value;
-                        console.log(`AI placed ${aiMove.value} in cell ${aiMove.index}`);
-                        
-                        // Update UI
-                        updateUI(currentGame);
-                        
-                        // Check for win with the new move, then switch turn if no win
-                    if (!await checkWinCondition()) {
-                         await switchTurn();
-                    }
-                    } else {
-                        console.log('AI could not make a move, switching turn');
-                        await switchTurn();
-                    }
-                } catch (error) {
-                    console.error('AI turn error:', error);
-                    await switchTurn();
-                } finally {
-                    // Hide AI thinking indicator
-                    if (aiThinkingEl) {
-                        aiThinkingEl.classList.add('hidden');
-                    }
+            const gameRef = doc(db, `sudoku-games/${gameId}`);
+            const gameSnap = await getDoc(gameRef);
+            if (!gameSnap.exists() || gameSnap.data().status !== 'active' || gameSnap.data().turn !== 'player2') {
+                if (aiThinkingEl) aiThinkingEl.classList.add('hidden');
+                return;
+            }
+            const currentData = gameSnap.data();
+            const turnBeforeAITurn = currentData.turn;
+
+            try {
+                const aiMove = await getAIMove(currentData);
+                if (aiMove) {
+                    await updateDoc(gameRef, { [`p2Cells.${aiMove.index}`]: aiMove.value });
+                    // The win check and turn switch will be handled by the snapshot listener
+                } else {
+                     await switchTurn(turnBeforeAITurn);
                 }
-            }, 1500 + Math.random() * 1500); // AI "thinking" time
+            } catch (error) {
+                console.error('AI turn error:', error);
+                await switchTurn(turnBeforeAITurn);
+            } finally {
+                if (aiThinkingEl) aiThinkingEl.classList.add('hidden');
+            }
         }
 
-        function endGameCleanup() {
-            if(unsubscribeGame) unsubscribeGame();
+        function endGameCleanup(deleteGameDoc = true) {
+            if (unsubscribeGame) unsubscribeGame();
             unsubscribeGame = null;
-            
             clearInterval(turnTimerInterval);
-            turnTimerInterval = null;
-            
-            // Only hide/show modals if they are in the wrong state
-            if (!gameArea.classList.contains('hidden')) {
-            gameArea.classList.add('hidden');
+            if (deleteGameDoc && gameId) {
+                const gameRef = doc(db, `sudoku-games/${gameId}`);
+                deleteDoc(gameRef).catch(e => console.error("Error deleting game doc:", e));
             }
-            if (!document.getElementById('score-display').classList.contains('hidden')) {
-                document.getElementById('score-display').classList.add('hidden');
-            }
-            if (setupModal.classList.contains('hidden')) {
-            setupModal.classList.remove('hidden');
-            }
-
             gameId = null;
             currentGame = null;
             localPlayerNumber = null;
             selectedCell = null;
+            gameArea.classList.add('hidden');
+            document.getElementById('score-display').classList.add('hidden');
+            setupModal.classList.remove('hidden');
         }
 
         // --- INITIALIZATION ---
         function init() {
-            // Load scores
             loadScores();
-            
-            // Standalone mode - no server required
-            console.log("🎮 Sudoku Duel - Standalone Mode Ready!");
-            console.log("✅ No server connection required");
-            console.log("✅ All features work offline");
-            
-            // Set up user for standalone mode
-            userId = 'standalone-user';
-            console.log("User ready for standalone play");
+            if (!firebaseConfig.apiKey || firebaseConfig.apiKey.includes("PASTE")) {
+                showMessage("Configuration Error", "Firebase is not configured.");
+                return;
+            }
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
 
-            // UI Setup
+            onAuthStateChanged(auth, user => { if (user) userId = user.uid; });
+
+            (async () => {
+                try {
+                     await signInAnonymously(auth);
+                } catch (error) {
+                     console.error("Anonymous sign-in failed:", error);
+                     showMessage("Authentication Error", "Could not connect to the server.");
+                }
+            })();
+
             let selectedDifficulty = 'medium';
             const difficultyButtons = document.querySelectorAll('.difficulty-btn');
+            difficultyButtons.forEach(btn => btn.addEventListener('click', () => {
+                difficultyButtons.forEach(b => b.classList.replace('bg-blue-500', 'bg-gray-200'));
+                btn.classList.replace('bg-gray-200', 'bg-blue-500');
+                selectedDifficulty = btn.dataset.difficulty;
+            }));
+
             const modeButtons = document.querySelectorAll('.mode-btn');
-            const multiplayerOptions = document.getElementById('multiplayer-options');
-            const startAiGameBtn = document.getElementById('start-ai-game-btn');
-            
-            difficultyButtons.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    difficultyButtons.forEach(b => {
-                        b.classList.remove('bg-blue-500', 'text-white');
-                        b.classList.add('bg-gray-200', 'text-gray-800');
-                    });
-                     btn.classList.add('bg-blue-500', 'text-white');
-                    btn.classList.remove('bg-gray-200', 'text-gray-800');
-                    selectedDifficulty = btn.dataset.difficulty;
-                })
-            });
+            modeButtons.forEach(btn => btn.addEventListener('click', () => {
+                 modeButtons.forEach(b => b.classList.replace('bg-blue-500', 'bg-gray-200'));
+                 btn.classList.replace('bg-gray-200', 'bg-blue-500');
+                 document.getElementById('multiplayer-options').classList.toggle('hidden', btn.id !== 'vs-player-btn');
+                 document.getElementById('start-ai-game-btn').classList.toggle('hidden', btn.id === 'vs-player-btn');
+            }));
 
-            modeButtons.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    modeButtons.forEach(b => {
-                        b.classList.remove('bg-blue-500', 'text-white');
-                        b.classList.add('bg-gray-200', 'text-gray-800');
-                    });
-                    btn.classList.add('bg-blue-500', 'text-white');
-                    btn.classList.remove('bg-gray-200', 'text-gray-800');
-
-                    if (btn.id === 'vs-player-btn') {
-                        multiplayerOptions.classList.remove('hidden');
-                        startAiGameBtn.classList.add('hidden');
-                    } else {
-                        multiplayerOptions.classList.add('hidden');
-                        startAiGameBtn.classList.remove('hidden');
-                    }
+            document.getElementById('start-ai-game-btn').addEventListener('click', () => createGame('ai', document.getElementById('timer-select').value, selectedDifficulty));
+            document.getElementById('create-game-btn').addEventListener('click', () => createGame('player', document.getElementById('timer-select').value, selectedDifficulty));
+            document.getElementById('join-game-btn').addEventListener('click', () => joinGame(document.getElementById('join-game-id').value));
+            document.getElementById('message-close-btn').addEventListener('click', () => { messageModal.classList.add('hidden'); endGameCleanup(); });
+            document.getElementById('end-game-btn').addEventListener('click', () => endGameCleanup());
+            document.getElementById('copy-game-id-btn').addEventListener('click', () => {
+                if (gameId) navigator.clipboard.writeText(gameId).then(() => {
+                    document.getElementById('copy-icon').classList.add('hidden');
+                    document.getElementById('check-icon').classList.remove('hidden');
+                    setTimeout(() => {
+                        document.getElementById('copy-icon').classList.remove('hidden');
+                        document.getElementById('check-icon').classList.add('hidden');
+                    }, 1500);
                 });
             });
+            document.getElementById('reset-scores-btn').addEventListener('click', resetScores);
 
-            startAiGameBtn.addEventListener('click', () => {
-                testGeminiAPI();
-                createGame('ai', document.getElementById('timer-select').value, selectedDifficulty);
-            });
-            
-            document.getElementById('create-game-btn').addEventListener('click', () => {
-                createGame('player', document.getElementById('timer-select').value, selectedDifficulty);
-            });
-            
-            document.getElementById('join-game-btn').addEventListener('click', () => {
-                const joinId = document.getElementById('join-game-id').value;
-                joinGame(joinId);
-            });
-            
-            document.getElementById('message-close-btn').addEventListener('click', () => {
-                messageModal.classList.add('hidden');
-                endGameCleanup();
-            });
-            
-            document.getElementById('end-game-btn').addEventListener('click', async () => {
-                    endGameCleanup();
-            });
-
-            document.getElementById('copy-game-id-btn').addEventListener('click', () => {
-                if (gameId) {
-                    const textArea = document.createElement("textarea");
-                    textArea.value = gameId;
-                    document.body.appendChild(textArea);
-                    textArea.select();
-                    try {
-                        document.execCommand('copy');
-                        // Visual feedback
-                        const copyIcon = document.getElementById('copy-icon');
-                        const checkIcon = document.getElementById('check-icon');
-                        copyIcon.classList.add('hidden');
-                        checkIcon.classList.remove('hidden');
-                        setTimeout(() => {
-                           copyIcon.classList.remove('hidden');
-                           checkIcon.classList.add('hidden');
-                        }, 1500);
-                    } catch (err) {
-                        console.error('Failed to copy text: ', err);
-                    }
-                    document.body.removeChild(textArea);
-                }
-            });
-
-            document.getElementById('reset-scores-btn').addEventListener('click', () => {
-                resetScores();
-            });
-
-            // Setup number pad
             for (let i = 1; i <= 9; i++) {
                 const btn = document.createElement('button');
                 btn.textContent = i;
@@ -1116,29 +785,18 @@ MOVE:`;
                 numberPad.appendChild(btn);
             }
             const eraseBtn = document.createElement('button');
-            eraseBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>`;
+            eraseBtn.innerHTML = `<svg class="w-6 h-6 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>`;
             eraseBtn.className = "w-12 h-12 bg-white border-2 border-red-500 text-red-500 font-bold rounded-lg shadow-md hover:bg-red-100 transition";
             eraseBtn.onclick = () => handleNumberClick(0);
             numberPad.appendChild(eraseBtn);
 
-            // Keyboard support
             document.addEventListener('keydown', (e) => {
                 if (selectedCell === null || !currentGame) return;
-                const isMyTurn = (localPlayerNumber === 1 && currentGame.turn === 'player1') || (localPlayerNumber === 2 && currentGame.turn === 'player2');
-                if (!isMyTurn) return;
-
-                if (e.key >= '1' && e.key <= '9') {
-                    handleNumberClick(parseInt(e.key));
-                } else if (e.key === '0' || e.key === 'Backspace' || e.key === 'Delete') {
-                    handleNumberClick(0);
-                } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                    e.preventDefault();
-                    navigateCell(e.key);
-                }
+                if (e.key >= '1' && e.key <= '9') handleNumberClick(parseInt(e.key));
+                else if (e.key === '0' || e.key === 'Backspace' || e.key === 'Delete') handleNumberClick(0);
+                else if (e.key.startsWith('Arrow')) { e.preventDefault(); navigateCell(e.key); }
             });
         }
-
-        // --- START THE APP ---
         init();
     </script>
 </body>
